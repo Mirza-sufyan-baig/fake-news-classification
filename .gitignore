@@ -25,7 +25,7 @@ Thumbs.db
 # VS Code settings
 .vscode/
 
-# Data files (VERY IMPORTANT)
+# Data files
 data/raw/
 data/processed/
 data/external/
