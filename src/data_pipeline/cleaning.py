@@ -59,21 +59,15 @@ class FakeNewsClassifier:
         print(classification_report(self.y_test, y_pred))
 
 
-# --------------------------
-# MAIN EXECUTION
-# --------------------------
 
 if __name__ == "__main__":
     df = pd.read_csv("data/raw/fake_news_dataset.csv")
 
-    # Clean text
     cleaner = BasicTextCleaner()
     df["cleaned_text"] = df["text"].apply(cleaner.clean)
 
-    # Encode labels
     df["label"] = df["label"].map({"real": 1, "fake": 0})
 
-    # Train model
     classifier = FakeNewsClassifier(df)
     classifier.prepare_data()
     classifier.train()
