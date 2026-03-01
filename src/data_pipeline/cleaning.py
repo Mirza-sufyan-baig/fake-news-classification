@@ -4,7 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score,recall_score,classification_report
+from sklearn.metrics import accuracy_score, precision_score,recall_score,classification_report,confusion_matrix
 
 df = pd.read_csv("data/raw/fake_news_dataset.csv")
 print(df.head())
@@ -52,12 +52,18 @@ class FakeNewsClassifier:
     def train(self):
         self.model.fit(self.X_train, self.y_train)
 
+    from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+
     def evaluate(self):
         y_pred = self.model.predict(self.X_test)
 
         print("Accuracy:", accuracy_score(self.y_test, y_pred))
+        print("\nClassification Report:\n")
         print(classification_report(self.y_test, y_pred))
 
+        print("\nConfusion Matrix:\n")
+        print(confusion_matrix(self.y_test, y_pred))
 
 
 if __name__ == "__main__":
