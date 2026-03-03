@@ -42,3 +42,6 @@ mlruns/
 
 # Docker
 *.tar
+
+#notebook
+*.ipynb

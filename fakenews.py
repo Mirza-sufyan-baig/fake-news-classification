@@ -66,7 +66,6 @@ class FakeNewsEDA:
             print(self.df["combined_text"].iloc[0])
 
 
-# ---- Running the class ----
 
 eda = FakeNewsEDA("data/raw/fake_news_dataset.csv")
 
