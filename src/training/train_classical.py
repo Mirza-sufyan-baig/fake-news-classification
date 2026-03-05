@@ -8,6 +8,7 @@ from sklearn.metrics import f1_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report, confusion_matrix
 #2nd dependencies
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
@@ -25,7 +26,8 @@ class Training:
         self.skf = None
 #created a method with self and file_path as parameters & applied the clenaer on entire dataset
 #stored the cleaned data inside the new column cleaned_text 
-#mapped the fake values in the label column as 0 and real as 1
+#mapped the fake values in the label column as 1 and real as 0
+#stripped them to remove any nan values and missing values
 #stored them in X and y
     def load_and_prepare_data(self,file_path):
         df = pd.read_csv(file_path)
@@ -40,6 +42,8 @@ class Training:
         return self.X, self.y
 #created a method with self and models as parameters
 #initialized the skf
+#created an empty list for storing the result values
+#initialized the ngrams
 #then created a closed loop for model ecaluation
 #created indexes for testing and training sets of x and y
 #initialized the tfidf vectorizer with max_features = 5000
@@ -50,16 +54,15 @@ class Training:
         ngram_options = [(1,1),(1,2)]
         class_weight = [None, "balanced"]
         #check if model supports class weights
-        for weight in [None, "balanced"]:
-            if hasattr(model_object, 'class_weight'):
-                model_object.set_params(class_weight = weight)
-            elif weight == 'balanced':
-                continue
+         #if not runs
         
         # OUTER LOOP: Iterate through each model
         for model_name, model_object in models.items():
             for ngram in ngram_options:
                 for weight in class_weight:
+                    if weight == 'balanced' and not hasattr(model_object, 'class_weight'):
+                        continue
+                        
                     print(f"\nModel: {model_name} | ngram: {ngram} | class_weight: {weight}")
                     fold_f1_scores = []
                     print(f"Evaluating {model_name}...")
@@ -82,6 +85,13 @@ class Training:
                 
                 score = f1_score(y_test, y_pred, average='binary')
                 fold_f1_scores.append(score)
+                
+                #classification report and confusion matrix
+                print("\nConfusion Matrix:")
+                print(confusion_matrix(y_test,y_pred))
+                
+                print("\nClassification Report:")
+                print(classification_report(y_test,y_pred))
             
             # Calculate metrics for THIS model after all 10 folds are done
             mean_f1 = np.mean(fold_f1_scores)
@@ -108,6 +118,42 @@ class Training:
         
         return results_df # The method ends here, after everything is done
     
+    def tune_hyperparameters(self):
+        print("\nStarting Hyperparameter Tuning...\n")
+        
+        pipeline = Pipeline({
+            ("tfidf", TfidfVectorizer(stop_words = "english")),
+            ("model", LogisticRegression(max_iter = 1000))
+        })
+        
+        param_grid = {
+            "tfidf__max_features": [5000,10000],
+            "tfidf__ngram_range" : [(1,1),(1,2)],
+            "model__c" : [0.1,1,10],
+            "model__class_weight" : [None, "balanced"]
+        }
+        
+        grid = GridSearchCV(
+            pipeline,param_grid,cv = 5, scoring = "f1", n_jobs=-1, verbose = 2 
+        )
+        
+        grid.fit(self.X, self.y)
+        print("\nBest Parameters Found:")
+        print(grid.best_params_)
+        
+        print("\nBest F1 Score:")
+        print(grid.best_score_)
+        
+        os.makedirs("models", exist_ok = True)
+        
+        joblib.dump(grid.best_estimator_, "models/best_tuned_pipeline.pkl")
+        
+        print("\nBest tuned model saved to models/best_tuned_pipeline.pkl")
+        
+        return grid.best_estimator_
+    
+        
+            
     def save_best_model(self, model_name, model_object):
         """
         Retrains the winner on ALL data and saves the artifacts.
@@ -129,12 +175,12 @@ class Training:
                 false_positives.append(text)
             elif true == 0 and pred == 1:
                 false_negatives.append(text)
-
+            #TP predicted as FN
             print("\nSample False Positives (Real predicted Fake):")
             for t in false_positives[:5]:
                 print(t[:200])
                 print()
-
+            #TN predicted as FP
             print("\nSample False Negatives (Fake predicted Real):")
             for t in false_negatives[:5]:
                 print(t[:200])
@@ -164,6 +210,8 @@ if __name__ == "__main__":
     print(y.value_counts())    
     
     results = classifier.run_evaluation(models_to_test)
+    
+    best_pipeline = classifier.tune_hyperparameters()
     
     best_model_name = results.iloc[0]['Model']
     best_model_obj = models_to_test[best_model_name]
