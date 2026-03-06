@@ -1,4 +1,5 @@
 import torch
+import os
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizer, BertForSequenceClassification
@@ -37,7 +38,7 @@ class FakeNewsDataset(Dataset):
     def compute_metrics(self,pred):
         
         labels = pred.label_ids
-        preds = pred.prediction.argmax(-1)
+        preds = pred.predictions.argmax(-1)
         
         precision , recall, f1, _ = precision_recall_fscore_support(
             labels,preds,average = "binary"
@@ -97,11 +98,13 @@ class FakeNewsDataset(Dataset):
         training_args = TrainingArguments(
             output_dir = "model/bert_output",
             learning_rate = 2e-5,
-            per_divice_train_batch_size = 8,
+            per_device_train_batch_size = 8,
             per_device_eval_batch_size  = 8,
-            num_train_epochs =3,
-            evaluation_strategy = "epoch",
-            save_strategy = "epoch",
+            num_train_epochs =2,
+            eval_strategy = "steps",
+            eval_steps = 500,
+            save_strategy = "steps",
+            save_steps = 500,
             logging_dir = "logs",
             load_best_model_at_end = True,
             metric_for_best_model = "f1"
@@ -115,7 +118,17 @@ class FakeNewsDataset(Dataset):
             compute_metrics = self.compute_metrics
         )
         
-        trainer.train()
+        #trainer.train()
+        # 1. Initialize as usual
+        # Find this line in your .py file (usually near the end):
+# trainer.train()
+
+# Change it to this:
+
+        checkpoint_dir = "model/bert_output"
+        resume_flag = True if os.path.exists(checkpoint_dir) and os.listdir(checkpoint_dir) else None
+
+        trainer.train(resume_from_checkpoint=resume_flag)
         trainer.evaluate()
         trainer.save_model("models/bert_fakenews_model")
         

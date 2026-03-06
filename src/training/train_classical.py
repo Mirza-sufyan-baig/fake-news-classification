@@ -76,11 +76,16 @@ class Training:
                 
                 X_train_tfidf = tfidf.fit_transform(X_train)
                 X_test_tfidf = tfidf.transform(X_test)
-                model_object.set_params(class_weight = weight)
+                # Only set class_weight if the model actually has that parameter
+                if hasattr(model_object, 'class_weight'):
+                    model_object.set_params(class_weight=weight)
+                elif weight == 'balanced':
+                     # Skip Naive Bayes for the 'balanced' loop since it doesn't support it
+                    continue
                 model = clone(model_object)
                 model_object.fit(X_train_tfidf, y_train)
                 
-                # Predict on TEST data
+                # Predict on test data
                 y_pred = model_object.predict(X_test_tfidf)
                 
                 score = f1_score(y_test, y_pred, average='binary')
@@ -121,20 +126,20 @@ class Training:
     def tune_hyperparameters(self):
         print("\nStarting Hyperparameter Tuning...\n")
         
-        pipeline = Pipeline({
+        pipeline = Pipeline([
             ("tfidf", TfidfVectorizer(stop_words = "english")),
             ("model", LogisticRegression(max_iter = 1000))
-        })
+        ])
         
         param_grid = {
             "tfidf__max_features": [5000,10000],
             "tfidf__ngram_range" : [(1,1),(1,2)],
-            "model__c" : [0.1,1,10],
+            "model__C" : [0.1,1,10],
             "model__class_weight" : [None, "balanced"]
         }
         
         grid = GridSearchCV(
-            pipeline,param_grid,cv = 5, scoring = "f1", n_jobs=-1, verbose = 2 
+            pipeline,param_grid,cv = 5, scoring = "f1", n_jobs=2, verbose = 2 
         )
         
         grid.fit(self.X, self.y)
