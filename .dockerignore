@@ -1,0 +1,12 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+.ipynb_checkpoints
+notebooks
+data
+logs
+experiments
+.env

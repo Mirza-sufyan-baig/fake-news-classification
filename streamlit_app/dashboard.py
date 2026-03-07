@@ -1,8 +1,8 @@
 import streamlit as st
 import joblib
 
-model = joblib.load("model/baseline_results.csv")
-vectorizer = joblib.load("model/tfidf_vectorizer.pkl")
+model = joblib.load("models/baseline_model.pkl")
+vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
 
 st.title("!Fake News Detection AI")
 
