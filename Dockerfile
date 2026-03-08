@@ -1,5 +1,5 @@
 # Use the slim version of python
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -10,6 +10,12 @@ COPY requirements.txt .
 # Use --extra-index-url if you are using torch to get the CPU version (saves ~700MB)
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
+# ... (after your existing RUN pip install -r requirements.txt line)
+
+# Add this line right AFTER the main install
+RUN pip install fastapi==0.115.8
+
+# ... (the rest of your COPY and CMD commands)
 # Copy your source code (the .dockerignore will keep 'fnenv' out)
 COPY src/ ./src/
 COPY models/ ./models/

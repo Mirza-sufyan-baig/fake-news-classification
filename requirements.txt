@@ -68,7 +68,7 @@ pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 pytz==2025.2
-pywin32==311
+#pywin32==311
 PyYAML==6.0.3
 referencing==0.37.0
 regex==2026.2.19
@@ -109,3 +109,5 @@ wrapt==2.1.1
 xxhash==3.6.0
 yarl==1.22.0
 zipp==3.23.0
+fastapi==0.115.8
+python-multipart==0.0.20

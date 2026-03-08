@@ -1,8 +1,8 @@
 import streamlit as st
+from src.inference.predict import FakeNewsPredictor
 import joblib
 
-model = joblib.load("models/baseline_model.pkl")
-vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
+predictor = FakeNewsPredictor()
 
 st.title("!Fake News Detection AI")
 
@@ -16,8 +16,7 @@ if st.button("predict"):
         st.warning("please enter some text")
         
     else:
-        text_vector = vectorizer.transform([user_input])
-        prediction = model.predict(text_vector)[0]
+        prediction, probability = predictor.predict(user_input)
         
         if prediction == 1:
             st.error("The news is predicted as Fake❌")
