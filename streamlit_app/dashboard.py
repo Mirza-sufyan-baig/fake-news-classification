@@ -1,8 +1,8 @@
 import streamlit as st
-from src.inference.predict import FakeNewsPredictor
+from src.inference.inference_service import InferenceService
 import joblib
 
-predictor = FakeNewsPredictor()
+predictor = InferenceService()
 
 st.title("!Fake News Detection AI")
 

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from src.inference.predict import FakeNewsPredictor
+from src.inference.inference_service import InferenceService
 import joblib
 
 #i am loading the model artifacts
@@ -9,7 +9,7 @@ import joblib
 
 app = FastAPI()
 
-predictor = FakeNewsPredictor()
+predictor = InferenceService()
 
 #schema request
 

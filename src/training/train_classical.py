@@ -1,9 +1,12 @@
 #imported all the dependencies 
 import pandas as pd
 import numpy as np
+import mlflow
+import mlflow.sklearn
 from src.features.cleaner import BasicTextCleaner
 from sklearn.model_selection import StratifiedKFold,GridSearchCV
 from sklearn.feature_extraction.text import TfidfVectorizer
+from src.utils.model_versioning import get_next_model_version
 from sklearn.metrics import f1_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
@@ -18,7 +21,7 @@ import joblib
 
 #created a class named training
 class Training:
-    
+    mlflow.set_experiment("fake_news_detection")
 #created a constructor with object parameter self
     def __init__(self):
         self.X = None
@@ -60,57 +63,84 @@ class Training:
         for model_name, model_object in models.items():
             for ngram in ngram_options:
                 for weight in class_weight:
+                    # Check if model supports class_weight before proceeding
                     if weight == 'balanced' and not hasattr(model_object, 'class_weight'):
                         continue
-                        
+
                     print(f"\nModel: {model_name} | ngram: {ngram} | class_weight: {weight}")
                     fold_f1_scores = []
-                    print(f"Evaluating {model_name}...")
+
+                    # Start MLflow run
+                    with mlflow.start_run(run_name=f"{model_name}_ngram{ngram}_cw{weight}"):
+                        mlflow.log_param("model_name", model_name)
+                        mlflow.log_param("ngram_range", ngram)
+                        mlflow.log_param("class_weight", weight)
+                        mlflow.log_param("max_features", 10000)
+
+                        for train_index, test_index in self.skf.split(self.X, self.y):
+                            X_train, X_test = self.X.iloc[train_index], self.X.iloc[test_index]
+                            y_train, y_test = self.y.iloc[train_index], self.y.iloc[test_index]
+
+                            tfidf = TfidfVectorizer(
+                                max_features=10000,
+                                stop_words="english",
+                                ngram_range=ngram
+                            )
+
+                            X_train_tfidf = tfidf.fit_transform(X_train)
+                            X_test_tfidf = tfidf.transform(X_test)
+
+                            model = clone(model_object)
+
+                            if hasattr(model, "class_weight"):
+                                model.set_params(class_weight=weight)
+
+                            model.fit(X_train_tfidf, y_train)
+                            y_pred = model.predict(X_test_tfidf)
+
+                            score = f1_score(y_test, y_pred, average="binary")
+                            fold_f1_scores.append(score)
+
+                            print("\nConfusion Matrix:")
+                            print(confusion_matrix(y_test, y_pred))
+
+                            print("\nClassification Report:")
+                            print(classification_report(y_test, y_pred))
+
+                        # Aggregate metrics outside the K-Fold loop but inside the MLflow run
+                        mean_f1 = np.mean(fold_f1_scores)
+                        std_f1 = np.std(fold_f1_scores)
+
+                        print(f"\nMean F1 Score: {mean_f1:.4f}")
+                        print(f"Std F1 Score: {std_f1:.4f}")
+
+                        # Log metrics
+                        mlflow.log_metric("mean_f1_score", mean_f1)
+                        mlflow.log_metric("std_f1_score", std_f1)
+
+                        # Log trained model
+                        mlflow.sklearn.log_model(model, "model")
+                        
+                        model_version = get_next_model_version()
+                        
+                        model_path = f"models/{model_version}.pkl"
+                        vector_path = f"models/{model_version}_vectorizer.pkl"
+                        
+                        joblib.dump(model,model_path)
+                        joblib.dump(tfidf, vector_path)           
+                        print(f"save model: {model_path}")         
             
-            # INNER LOOP: Iterate through the 10 folds
-            for train_index, test_index in self.skf.split(self.X, self.y):
-                X_train, X_test = self.X.iloc[train_index], self.X.iloc[test_index]
-                y_train, y_test = self.y.iloc[train_index], self.y.iloc[test_index]
-                
-                tfidf = TfidfVectorizer(max_features=10000, stop_words = "english", ngram_range = ngram)
-                
-                X_train_tfidf = tfidf.fit_transform(X_train)
-                X_test_tfidf = tfidf.transform(X_test)
-                # Only set class_weight if the model actually has that parameter
-                if hasattr(model_object, 'class_weight'):
-                    model_object.set_params(class_weight=weight)
-                elif weight == 'balanced':
-                     # Skip Naive Bayes for the 'balanced' loop since it doesn't support it
-                    continue
-                model = clone(model_object)
-                model_object.fit(X_train_tfidf, y_train)
-                
-                # Predict on test data
-                y_pred = model_object.predict(X_test_tfidf)
-                
-                score = f1_score(y_test, y_pred, average='binary')
-                fold_f1_scores.append(score)
-                
-                #classification report and confusion matrix
-                print("\nConfusion Matrix:")
-                print(confusion_matrix(y_test,y_pred))
-                
-                print("\nClassification Report:")
-                print(classification_report(y_test,y_pred))
             
-            # Calculate metrics for THIS model after all 10 folds are done
-            mean_f1 = np.mean(fold_f1_scores)
-            std_f1 = np.std(fold_f1_scores)
-            
-            results.append({
-                'Model': model_name,
-                'ngram_range' : ngram,
-                'class_weight' : weight,
-                'Mean_F1': mean_f1,
-                'Std_F1': std_f1,
-                'Scores' : fold_f1_scores
-            })
-            print(f"\nModel: {model_name} | ngram: {ngram} | class_weight: {weight}")
+                        results.append({
+                            'Model': model_name,
+                            'ngram_range' : ngram,
+                            'class_weight' : weight,
+                            'Mean_F1': mean_f1,
+                            'Std_F1': std_f1,
+                            'Scores' : fold_f1_scores
+                        })
+                        print(f"\nModel: {model_name} | ngram: {ngram} | class_weight: {weight}")
+                        return results
         # --- THE FIX: This block is OUTSIDE all loops ---
         # It only executes once all models and all folds are finished
         results_df = pd.DataFrame(results).sort_values(by='Mean_F1', ascending=False)
@@ -132,8 +162,8 @@ class Training:
         ])
         
         param_grid = {
-            "tfidf__max_features": [5000,10000],
-            "tfidf__ngram_range" : [(1,1),(1,2)],
+            "tfidf__max_features": [5000,10000,20000],
+            "tfidf__ngram_range" : [(1,1),(1,2),(1,3)],
             "model__C" : [0.1,1,10],
             "model__class_weight" : [None, "balanced"]
         }
@@ -164,7 +194,7 @@ class Training:
         Retrains the winner on ALL data and saves the artifacts.
         """
         print(f"\n--- Retraining and Saving Best Model: {model_name} ---")
-        tfidf = TfidfVectorizer(max_features=5000, stop_words="english")
+        tfidf = TfidfVectorizer(max_features=10000, stop_words="english")
         
         # Fit on the entire dataset
         X_tfidf = tfidf.fit_transform(self.X)
@@ -217,7 +247,7 @@ if __name__ == "__main__":
     results = classifier.run_evaluation(models_to_test)
     
     best_pipeline = classifier.tune_hyperparameters()
-    
+    results_df = pd.DataFrame(results)
     best_model_name = results.iloc[0]['Model']
     best_model_obj = models_to_test[best_model_name]
     

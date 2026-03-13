@@ -1,0 +1,7 @@
+model:
+  max_features : 1000
+  ngram_range: [1,2]
+
+training:
+  folds : 10
+  metric : f1

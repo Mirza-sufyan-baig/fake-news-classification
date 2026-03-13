@@ -1,8 +1,10 @@
 import os
 import joblib
 
+from src.features.cleaner import BasicTextCleaner
 
-class FakeNewsPredictor:
+
+class InferenceService:
 
     def __init__(self):
 
@@ -10,6 +12,8 @@ class FakeNewsPredictor:
 
         self.model = joblib.load(model_path)
         self.vectorizer = joblib.load(vectorizer_path)
+
+        self.cleaner = BasicTextCleaner()
 
     def load_latest_model(self):
 
@@ -21,13 +25,19 @@ class FakeNewsPredictor:
         latest = sorted(files)[-1]
 
         model_path = f"models/{latest}"
-        vectorizer_path = f"models/{latest.replace('.pkl', '')}_vectorizer.pkl"
+        vectorizer_path = f"models/{latest.replace('.pkl','')}_vectorizer.pkl"
 
         return model_path, vectorizer_path
 
+    def preprocess(self, text):
+
+        return self.cleaner.clean(text)
+
     def predict(self, text):
 
-        vector = self.vectorizer.transform([text])
+        cleaned = self.preprocess(text)
+
+        vector = self.vectorizer.transform([cleaned])
 
         prediction = self.model.predict(vector)[0]
 
@@ -36,4 +46,6 @@ class FakeNewsPredictor:
         if hasattr(self.model, "predict_proba"):
             probability = self.model.predict_proba(vector)[0].max()
 
-        return prediction, probability
+        label = "FAKE" if prediction == 1 else "REAL"
+
+        return label, probability
