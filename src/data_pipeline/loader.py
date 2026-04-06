@@ -1,81 +1,212 @@
+"""Data loading, validation, quality checks, and preprocessing.
+
+Responsibilities:
+    1. Load CSV with schema validation
+    2. Run data quality checks (null ratios, class balance, duplicates)
+    3. Apply text cleaning pipeline
+    4. Encode labels
+    5. Return clean (X, y) pair with audit metadata
+
+Design:
+    - DataLoader is stateless — every call to prepare() is idempotent
+    - Quality issues are logged as warnings, not silently dropped
+    - Returns DataResult with metadata for experiment tracking
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
-import re 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import LabelEncoder 
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score,recall_score,classification_report,confusion_matrix
 
-df = pd.read_csv("data/raw/fake_news_dataset.csv")
-print(df.head())
+from configs.settings import get_settings
+from src.core.exceptions import DataNotFoundError, DataQualityError, DataSchemaError
+from src.features.cleaner import TextCleaner
+from src.utils.logger import get_logger
 
-class BasicTextCleaner:
-    def __init__(self): 
-        self.le = LabelEncoder()
-        self.tf = TfidfVectorizer() 
-    def clean(self,text): 
-        text = str(text.lower()) 
-        text = text.strip() 
-        text = re.sub(r"http\s+ | www\s+", "", text) 
-        text = re.sub(r"<.*?>", "", text)
-        text = re.sub(r"\s+", " ", text) 
-        text = re.sub(r"[^a-zA-Z\s]", "", text) 
-        return text 
-    def preprocess(self,text):
-        self.df['label'] = self.df['label'].map({'real':1, 'fake':0}) 
-        print(self.df['label'].value_counts())
-
-cleaner = BasicTextCleaner()
-df['cleaned'] = df['text'].apply(cleaner.clean)
-#pd.set_option("display.max_colwidth",None)
-#print(df[["text", "cleaned"]].head())
-
-class FakeNewsClassifier:
-    def __init__(self,df):
-        self.df = df
-        self.model = LogisticRegression()
-        self.vectorizer = TfidfVectorizer(max_features= 5000)
-        self.X_train = None
-        self.X_test = None 
-        self.y_train = None
-        self.y_test = None
-        
-    def prepare_data(self):
-        X = self.df["cleaned_text"]
-        y = self.df["label"]
-
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-        self.X_train = self.vectorizer.fit_transform(self.X_train)
-        self.X_test = self.vectorizer.transform(self.X_test)
-
-    def train(self):
-        self.model.fit(self.X_train, self.y_train)
-
-    from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+logger = get_logger(__name__)
 
 
-    def evaluate(self):
-        y_pred = self.model.predict(self.X_test)
+@dataclass
+class DataResult:
+    """Container for preprocessed data with audit metadata."""
+    X: pd.Series
+    y: pd.Series
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-        print("Accuracy:", accuracy_score(self.y_test, y_pred))
-        print("\nClassification Report:\n")
-        print(classification_report(self.y_test, y_pred))
+    @property
+    def n_samples(self) -> int:
+        return len(self.X)
 
-        print("\nConfusion Matrix:\n")
-        print(confusion_matrix(self.y_test, y_pred))
+    @property
+    def class_distribution(self) -> dict[int, int]:
+        return self.y.value_counts().to_dict()
 
 
-if __name__ == "__main__":
-    df = pd.read_csv("data/raw/fake_news_dataset.csv")
+class DataLoader:
+    """Load, validate, and preprocess the fake news dataset.
 
-    cleaner = BasicTextCleaner()
-    df["cleaned_text"] = df["text"].apply(cleaner.clean)
+    Example:
+        loader = DataLoader()
+        result = loader.prepare()
+        print(result.n_samples, result.class_distribution)
+    """
 
-    df["label"] = df["label"].map({"real": 1, "fake": 0})
+    def __init__(self, file_path: Path | str | None = None) -> None:
+        settings = get_settings()
+        self.file_path = Path(file_path) if file_path else settings.dataset_path
+        self.cleaner = TextCleaner()
+        self._settings = settings
 
-    classifier = FakeNewsClassifier(df)
-    classifier.prepare_data()
-    classifier.train()
-    classifier.evaluate()
-        
+    def load(self) -> pd.DataFrame:
+        """Load raw CSV with schema validation."""
+        logger.info("Loading dataset from %s", self.file_path)
+
+        if not self.file_path.exists():
+            raise DataNotFoundError(
+                f"Dataset not found: {self.file_path}",
+                context={"path": str(self.file_path)},
+            )
+
+        df = pd.read_csv(self.file_path)
+        logger.info("Raw shape: %s", df.shape)
+
+        # Schema validation
+        required = {self._settings.text_column, self._settings.label_column}
+        missing = required - set(df.columns)
+        if missing:
+            raise DataSchemaError(
+                f"Missing required columns: {missing}",
+                context={"required": list(required), "found": list(df.columns)},
+            )
+
+        return df
+
+    def validate(self, df: pd.DataFrame) -> dict[str, Any]:
+        """Run data quality checks. Returns audit dict."""
+        s = self._settings
+        audit: dict[str, Any] = {
+            "raw_rows": len(df),
+            "columns": list(df.columns),
+        }
+
+        # Null ratio check
+        text_nulls = df[s.text_column].isna().mean()
+        label_nulls = df[s.label_column].isna().mean()
+        audit["text_null_ratio"] = round(text_nulls, 4)
+        audit["label_null_ratio"] = round(label_nulls, 4)
+
+        if text_nulls > s.max_null_ratio:
+            logger.warning(
+                "High null ratio in '%s': %.1f%% (threshold: %.1f%%)",
+                s.text_column, text_nulls * 100, s.max_null_ratio * 100,
+            )
+
+        # Duplicate check
+        n_dup_rows = df.duplicated().sum()
+        n_dup_text = df.duplicated(subset=[s.text_column]).sum()
+        audit["duplicate_rows"] = int(n_dup_rows)
+        audit["duplicate_texts"] = int(n_dup_text)
+
+        if n_dup_text > 0:
+            logger.warning(
+                "%d duplicate texts found (%.1f%% of dataset)",
+                n_dup_text, n_dup_text / len(df) * 100,
+            )
+
+        # Label distribution
+        label_counts = df[s.label_column].value_counts()
+        audit["label_distribution"] = label_counts.to_dict()
+
+        unknown_labels = set(df[s.label_column].dropna().unique()) - set(s.label_map.keys())
+        if unknown_labels:
+            logger.warning("Unknown labels found: %s", unknown_labels)
+            audit["unknown_labels"] = list(unknown_labels)
+
+        # Class imbalance check
+        if len(label_counts) >= 2:
+            ratio = label_counts.min() / label_counts.max()
+            audit["class_balance_ratio"] = round(ratio, 4)
+            if ratio < 0.3:
+                logger.warning(
+                    "Severe class imbalance: minority/majority = %.2f", ratio
+                )
+
+        # Text length stats
+        text_lengths = df[s.text_column].astype(str).str.split().str.len()
+        audit["text_length_stats"] = {
+            "mean": round(text_lengths.mean(), 1),
+            "median": round(text_lengths.median(), 1),
+            "min": int(text_lengths.min()),
+            "max": int(text_lengths.max()),
+            "std": round(text_lengths.std(), 1),
+        }
+
+        logger.info("Data validation complete: %s", audit)
+        return audit
+
+    def prepare(self, df: pd.DataFrame | None = None) -> DataResult:
+        """Full pipeline: load → validate → clean → encode → return.
+
+        Returns:
+            DataResult containing (X, y) and audit metadata.
+        """
+        if df is None:
+            df = self.load()
+
+        s = self._settings
+
+        # Validate
+        audit = self.validate(df)
+
+        # Drop nulls
+        before = len(df)
+        df = df.dropna(subset=[s.text_column, s.label_column]).reset_index(drop=True)
+        dropped_nulls = before - len(df)
+        if dropped_nulls > 0:
+            logger.info("Dropped %d rows with missing values", dropped_nulls)
+
+        # Drop duplicates
+        before = len(df)
+        df = df.drop_duplicates(subset=[s.text_column]).reset_index(drop=True)
+        dropped_dups = before - len(df)
+        if dropped_dups > 0:
+            logger.info("Dropped %d duplicate texts", dropped_dups)
+
+        # Filter unknown labels
+        df = df[df[s.label_column].isin(s.label_map.keys())].reset_index(drop=True)
+
+        # Clean text
+        df["cleaned_text"] = df[s.text_column].apply(self.cleaner.clean)
+
+        # Remove empty-after-cleaning rows
+        mask = df["cleaned_text"].str.strip() != ""
+        dropped_empty = (~mask).sum()
+        df = df[mask].reset_index(drop=True)
+        if dropped_empty > 0:
+            logger.info("Dropped %d rows empty after cleaning", dropped_empty)
+
+        # Encode labels
+        df["label_encoded"] = df[s.label_column].map(s.label_map)
+
+        X = df["cleaned_text"]
+        y = df["label_encoded"]
+
+        # Final audit
+        audit.update({
+            "dropped_nulls": dropped_nulls,
+            "dropped_duplicates": dropped_dups,
+            "dropped_empty": int(dropped_empty),
+            "final_rows": len(X),
+            "final_class_distribution": y.value_counts().to_dict(),
+            "cleaner_fingerprint": self.cleaner.config.fingerprint(),
+        })
+
+        logger.info(
+            "Preprocessing complete: %d → %d samples | Distribution: %s",
+            audit["raw_rows"], len(X), y.value_counts().to_dict(),
+        )
+
+        return DataResult(X=X, y=y, metadata=audit)
