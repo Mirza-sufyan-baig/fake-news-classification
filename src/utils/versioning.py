@@ -10,7 +10,13 @@ def get_next_model_version(model_dir="models", prefix="baseline"):
     if not existing:
         return f"{prefix}_v1"
 
-    versions = []
+# Inside get_next_model_version()
+    # We only want files that are JUST the version number, not the vectorizers
+    versions = [
+        int(f.split('.')[0]) 
+        for f in os.listdir("models") 
+        if f.endswith('.pkl') and f[0].isdigit() and "vectorizer" not in f
+    ]
 
     for name in existing:
         try:

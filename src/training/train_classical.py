@@ -58,7 +58,7 @@ class Training:
         class_weight = [None, "balanced"]
         #check if model supports class weights
          #if not runs
-        
+        model_version = get_next_model_version()
         # OUTER LOOP: Iterate through each model
         for model_name, model_object in models.items():
             for ngram in ngram_options:
@@ -121,13 +121,12 @@ class Training:
                         # Log trained model
                         mlflow.sklearn.log_model(model, "model")
                         
-                        model_version = get_next_model_version()
                         
-                        model_path = f"models/{model_version}.pkl"
-                        vector_path = f"models/{model_version}_vectorizer.pkl"
+                        model_path = f"models/baseline_v{model_version}.pkl" # Added 'baseline_v'
+                        vectorizer_path = f"models/baseline_v{model_version}_vectorizer.pkl"
                         
                         joblib.dump(model,model_path)
-                        joblib.dump(tfidf, vector_path)           
+                        joblib.dump(tfidf, vectorizer_path)           
                         print(f"save model: {model_path}")         
             
             
@@ -140,7 +139,7 @@ class Training:
                             'Scores' : fold_f1_scores
                         })
                         print(f"\nModel: {model_name} | ngram: {ngram} | class_weight: {weight}")
-                        return results
+                        
         # --- THE FIX: This block is OUTSIDE all loops ---
         # It only executes once all models and all folds are finished
         results_df = pd.DataFrame(results).sort_values(by='Mean_F1', ascending=False)
@@ -233,24 +232,34 @@ if __name__ == "__main__":
     file_path = "data/raw/fake_news_dataset.csv"
     classifier = Training()
     X, y = classifier.load_and_prepare_data(file_path)
+    
     models_to_test = {
-        "LogisticRegression": LogisticRegression(),
+        "LogisticRegression": LogisticRegression(max_iter=1000),
         "Linear svm": LinearSVC(),
         "naive bayes": MultinomialNB()
     }
     
-    print("data loaded successfully")
-    print("Number of samples", len(X))
-    print("class distribution:")
+    print("Data loaded successfully")
+    print("Number of samples:", len(X))
+    print("Class distribution:")
     print(y.value_counts())    
     
+    # 1. run_evaluation returns a LIST of dictionaries
     results = classifier.run_evaluation(models_to_test)
     
-    best_pipeline = classifier.tune_hyperparameters()
-    results_df = pd.DataFrame(results)
-    best_model_name = results.iloc[0]['Model']
+    # 2. Convert the list to a DataFrame and SORT it by score
+    results_df = pd.DataFrame(results).sort_values(by='Mean_F1', ascending=False)
+    
+    # 3. Now use results_df (the DataFrame) to get the best model name
+    best_model_name = results_df.iloc[0]['Model']
     best_model_obj = models_to_test[best_model_name]
     
+    print(f"\nWinner: {best_model_name} with F1: {results_df.iloc[0]['Mean_F1']:.4f}")
+    
+    # 4. Save the best model
     classifier.save_best_model(best_model_name, best_model_obj)
     
-    print("evaluation finished")
+    # 5. Optional: Run hyperparameter tuning
+    # Note: This is separate from the baseline evaluation above
+    
+    print("Evaluation and saving finished successfully.")
