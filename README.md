@@ -349,5 +349,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>Built with ⚡ by <strong>Shbz</strong> — 2026</sub>
+  <sub>Built with ⚡ by <strong>sufyan</strong> — 2026</sub>
 </p>
